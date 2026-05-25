@@ -22,9 +22,9 @@ interface AIEvaluation {
 }
 
 const MODEL_FALLBACKS = [
-  'gemini-3-flash-preview',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
+  'gemini-3-flash-preview',
 ];
 
 const getModel = (modelName: string = MODEL_FALLBACKS[0]) =>
@@ -231,3 +231,4 @@ Reply in 2-3 short sentences.`;
     return generateWithFallback(prompt);
   },
 };
+
