@@ -1,8 +1,45 @@
 import { Response } from 'express';
+import fs from 'fs';
 import { AuthRequest } from '../types';
 import { User, Submission, Vote, Participant, Task, Challenge } from '../models';
+import { uploadToCloudinary } from '../utils/cloudinary';
 
 export const userController = {
+  uploadAvatar: async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const file = req.file;
+
+      if (!file) {
+        res.status(400).json({ message: 'Файл аватара не загружен' });
+        return;
+      }
+
+      if (!file.mimetype.startsWith('image/')) {
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        res.status(400).json({ message: 'Аватар должен быть изображением' });
+        return;
+      }
+
+      const avatarUrl = await uploadToCloudinary(file.path, 'photo', 'ba-challenge/avatars');
+
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+
+      await User.update({ avatarUrl }, { where: { id: userId } });
+
+      const updated = await User.findByPk(userId, {
+        attributes: { exclude: ['password'] },
+      });
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error('uploadAvatar error:', error.message);
+      res.status(500).json({ message: 'Ошибка загрузки аватара' });
+    }
+  },
+
   getStats: async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.id;

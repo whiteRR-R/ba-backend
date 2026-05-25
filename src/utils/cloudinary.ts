@@ -24,12 +24,13 @@ const ensureCloudinaryConfig = (): void => {
 
 export const uploadToCloudinary = async (
   filePath: string,
-  mediaType: 'photo' | 'video'
+  mediaType: 'photo' | 'video',
+  folder = 'ba-challenge/submissions'
 ): Promise<string> => {
   ensureCloudinaryConfig();
 
   const result = await cloudinary.uploader.upload(filePath, {
-    folder: 'ba-challenge/submissions',
+    folder,
     resource_type: mediaType === 'video' ? 'video' : 'image',
   });
 
