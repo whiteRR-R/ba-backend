@@ -1,6 +1,6 @@
 import multer from 'multer';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 
 // Создаём папки если не существуют
@@ -23,7 +23,7 @@ const storage = multer.diskStorage({
     filename: (req, file, cb) => {
         // Уникальное имя файла: uuid + оригинальное расширение
         const ext = path.extname(file.originalname);
-        const filename = `${uuidv4()}${ext}`;
+        const filename = `${randomUUID()}${ext}`;
         cb(null, filename);
     },
 });

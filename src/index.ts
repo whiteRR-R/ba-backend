@@ -29,6 +29,16 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 app.use('/api', routes);
 
+app.get('/', (req, res) => {
+  res.json({
+    status: 'OK',
+    message: 'B&A Challenge API is running',
+    docs: '/api',
+    health: '/health',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
