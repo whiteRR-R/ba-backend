@@ -160,6 +160,7 @@ export const challengeController = {
                     familyOwnerId: { [Op.is]: null as any },
                     [Op.or]: [
                         { visibility: 'public' },
+                        { visibility: 'protected' },
                         { creatorId: userId },
                         { '$participants.userId$': userId },
                     ],
