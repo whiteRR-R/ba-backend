@@ -4,252 +4,230 @@ import { ENV } from '../config/env';
 const genAI = new GoogleGenerativeAI(ENV.ANTHROPIC_API_KEY);
 
 interface GeneratedTask {
-    day: number;
-    title: string;
-    description: string;
-    deadline: string;        // ✅ добавили
+  day: number;
+  title: string;
+  description: string;
+  deadline: string;
 }
 
 interface AITaskPlan {
-    tasks: GeneratedTask[];
-    summary: string;
+  tasks: GeneratedTask[];
+  summary: string;
 }
 
 interface AIEvaluation {
-    score: number;
-    comment: string;
-    isCompleted: boolean;
+  score: number;
+  comment: string;
+  isCompleted: boolean;
 }
 
-// Список моделей для fallback — пробуем по очереди
 const MODEL_FALLBACKS = [
-    // 'gemini-3.1-flash-lite-preview',
-    'gemini-3-flash-preview',
+  'gemini-3-flash-preview',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
 ];
 
-// Получаем рабочую модель
-const getModel = (modelName: string = MODEL_FALLBACKS[0]) => {
-    return genAI.getGenerativeModel({ model: modelName });
+const getModel = (modelName: string = MODEL_FALLBACKS[0]) =>
+  genAI.getGenerativeModel({ model: modelName });
+
+const getRetryDelay = (errorMessage: string): number => {
+  const match = errorMessage.match(/Please retry in (\d+)/);
+  return match ? (parseInt(match[1], 10) + 2) * 1000 : 6000;
 };
 
-// Пробуем сгенерировать с fallback на другие модели
-// Извлекаем сколько секунд ждать из ошибки 429
-const getRetryDelay = (errorMessage: string): number => {
-    const match = errorMessage.match(/Please retry in (\d+)/);
-    return match ? (parseInt(match[1]) + 2) * 1000 : 60000;
-};
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const isTransientModelError = (message: string = ''): boolean => {
+  const msg = message.toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('503') ||
+    msg.includes('high demand') ||
+    msg.includes('service unavailable') ||
+    msg.includes('overloaded')
+  );
+};
+
 const generateWithFallback = async (prompt: string): Promise<string> => {
-    let lastError: Error | null = null;
+  let lastError: Error | null = null;
 
-    for (const modelName of MODEL_FALLBACKS) {
+  for (const modelName of MODEL_FALLBACKS) {
+    try {
+      const m = getModel(modelName);
+      const result = await m.generateContent(prompt);
+      return result.response.text();
+    } catch (err: any) {
+      lastError = err;
+
+      if (!isTransientModelError(err?.message || '')) {
+        continue;
+      }
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const delay = err?.message?.includes('429') ? getRetryDelay(err.message) : attempt * 4000;
+        await sleep(delay);
+
         try {
-            console.log(`🤖 Пробую модель: ${modelName}`);
-            const m = getModel(modelName);
-            const result = await m.generateContent(prompt);
-            const text = result.response.text();
-            console.log(`✅ Успешно с моделью: ${modelName}`);
-            return text;
-        } catch (err: any) {
-            console.error(`❌ Модель ${modelName}: ${err.message?.slice(0, 100)}`);
-
-            // Если 429 — ждём и пробуем ту же модель ещё раз
-            if (err.message?.includes('429')) {
-                const delay = getRetryDelay(err.message);
-                console.log(`⏳ Жду ${delay / 1000} сек перед повтором...`);
-                await sleep(delay);
-
-                try {
-                    console.log(`🔄 Повтор модели: ${modelName}`);
-                    const m = getModel(modelName);
-                    const result = await m.generateContent(prompt);
-                    console.log(`✅ Повтор успешен: ${modelName}`);
-                    return result.response.text();
-                } catch (retryErr: any) {
-                    console.error(`❌ Повтор тоже не сработал: ${retryErr.message?.slice(0, 80)}`);
-                    lastError = retryErr;
-                }
-            } else {
-                lastError = err;
-            }
+          const m = getModel(modelName);
+          const retryResult = await m.generateContent(prompt);
+          return retryResult.response.text();
+        } catch (retryErr: any) {
+          lastError = retryErr;
         }
+      }
+    }
+  }
+
+  throw new Error(
+    `All Gemini models are temporarily unavailable. Last error: ${lastError?.message?.slice(0, 180)}`
+  );
+};
+
+const parseModelJson = <T>(text: string): T => {
+  const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  return JSON.parse(match ? match[0] : cleaned) as T;
+};
+
+export const aiService = {
+  generateTasks: async (
+    challengeTitle: string,
+    challengeDescription: string,
+    startDate: string,
+    endDate: string,
+    taskCount: number,
+    language: string = 'ru'
+  ): Promise<AITaskPlan> => {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const interval = Math.max(1, Math.floor(totalDays / taskCount));
+
+    const deadlines: { day: number; deadline: string }[] = [];
+    for (let i = 0; i < taskCount; i++) {
+      const dayNumber = (i + 1) * interval;
+      const deadlineDate = new Date(start);
+      deadlineDate.setDate(deadlineDate.getDate() + dayNumber);
+      deadlines.push({
+        day: dayNumber,
+        deadline: deadlineDate.toISOString().split('T')[0],
+      });
     }
 
-    throw new Error(`Все модели недоступны. Последняя ошибка: ${lastError?.message?.slice(0, 150)}`);
-};
-export const aiService = {
+    const langInstruction =
+      language === 'kz'
+        ? 'Reply in Kazakh.'
+        : language === 'en'
+        ? 'Reply in English.'
+        : 'Reply in Russian.';
 
-    generateTasks: async (
-        challengeTitle: string,
-        challengeDescription: string,
-        startDate: string,
-        endDate: string,
-        taskCount: number,        // ✅ сколько задач хочет пользователь
-        language: string = 'ru'
-    ): Promise<AITaskPlan> => {
-
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const totalDays = Math.ceil(
-            (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
-        );
-
-        // Вычисляем интервал между задачами
-        const interval = Math.floor(totalDays / taskCount);
-
-        // Заранее считаем дедлайны — AI не должен их придумывать
-        const deadlines: { day: number; deadline: string }[] = [];
-        for (let i = 0; i < taskCount; i++) {
-            const dayNumber = (i + 1) * interval;
-            const deadlineDate = new Date(start);
-            deadlineDate.setDate(deadlineDate.getDate() + dayNumber);
-            deadlines.push({
-                day: dayNumber,
-                deadline: deadlineDate.toISOString().split('T')[0],
-            });
-        }
-
-        const langInstruction =
-            language === 'kz' ? 'Жауапты қазақ тілінде бер.' :
-                language === 'en' ? 'Respond in English.' :
-                    'Отвечай на русском языке.';
-
-        console.log(`🤖 AI генерирует ${taskCount} задач с интервалом ${interval} дней...`);
-
-        const model = genAI.getGenerativeModel({ model: MODEL_FALLBACKS[0] });
-
-        const prompt = `${langInstruction}
-
-Создай ${taskCount} задач для челленджа:
-Название: ${challengeTitle}
-Описание: ${challengeDescription}
-Срок: ${totalDays} дней
-
-Задачи распределены по дням: ${deadlines.map(d => `День ${d.day}`).join(', ')}
-
-Верни ТОЛЬКО JSON без markdown:
+    const prompt = `${langInstruction}
+Create exactly ${taskCount} challenge tasks.
+Challenge title: ${challengeTitle}
+Challenge description: ${challengeDescription}
+Duration: ${totalDays} days
+Task days: ${deadlines.map((d) => `Day ${d.day}`).join(', ')}
+Return only JSON (no markdown):
 {
   "tasks": [
-    { "title": "Название задачи", "description": "Детальное описание что нужно сделать" }
+    { "title": "Task title", "description": "Detailed task description" }
   ],
-  "summary": "Краткое описание плана"
+  "summary": "Short summary"
 }
+Return exactly ${taskCount} items in tasks.`;
 
-Верни ровно ${taskCount} задач в массиве tasks (только title и description, без day и deadline).`;
+    const text = await generateWithFallback(prompt);
+    const parsed = parseModelJson<{ tasks: Array<{ title: string; description: string }>; summary: string }>(text);
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-        const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        const match = cleaned.match(/\{[\s\S]*\}/);
-        const parsed = JSON.parse(match ? match[0] : cleaned);
+    const tasks = parsed.tasks.slice(0, taskCount).map((t, i) => ({
+      title: t.title,
+      description: t.description,
+      day: deadlines[i].day,
+      deadline: deadlines[i].deadline,
+    }));
 
-        // Объединяем AI задачи с нашими дедлайнами
-        const tasks = parsed.tasks.map((t: any, i: number) => ({
-            title: t.title,
-            description: t.description,
-            day: deadlines[i].day,
-            deadline: deadlines[i].deadline,
-        }));
+    return { tasks, summary: parsed.summary };
+  },
 
-        return { tasks, summary: parsed.summary };
-    },
+  evaluateSubmission: async (
+    taskTitle: string,
+    taskDescription: string,
+    mediaUrl: string,
+    mediaType: 'photo' | 'video',
+    language: string = 'ru'
+  ): Promise<AIEvaluation> => {
+    const langInstruction =
+      language === 'kz'
+        ? 'Reply in Kazakh.'
+        : language === 'en'
+        ? 'Reply in English.'
+        : 'Reply in Russian.';
 
-    evaluateSubmission: async (
-        taskTitle: string,
-        taskDescription: string,
-        mediaUrl: string,
-        mediaType: 'photo' | 'video',
-        language: string = 'ru'
-    ): Promise<AIEvaluation> => {
+    if (mediaType === 'photo') {
+      try {
+        const imageResponse = await fetch(mediaUrl);
+        const imageBuffer = await imageResponse.arrayBuffer();
+        const base64Image = Buffer.from(imageBuffer).toString('base64');
+        const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
 
-        const langInstruction =
-            language === 'kz' ? 'Жауапты қазақ тілінде бер.' :
-                language === 'en' ? 'Respond in English.' :
-                    'Отвечай на русском языке.';
+        for (const modelName of MODEL_FALLBACKS) {
+          try {
+            const vModel = getModel(modelName);
+            const result = await vModel.generateContent([
+              {
+                inlineData: {
+                  mimeType: mimeType as 'image/jpeg' | 'image/png' | 'image/webp',
+                  data: base64Image,
+                },
+              },
+              `${langInstruction}
+You are a challenge judge. Evaluate the photo submission.
+Task: ${taskTitle}
+Task description: ${taskDescription}
+Return only JSON: {"score":85,"comment":"...","isCompleted":true}
+score must be 0..100`,
+            ]);
 
-        if (mediaType === 'photo') {
-            try {
-                const imageResponse = await fetch(mediaUrl);
-                const imageBuffer = await imageResponse.arrayBuffer();
-                const base64Image = Buffer.from(imageBuffer).toString('base64');
-                const mimeType = (imageResponse.headers.get('content-type') || 'image/jpeg');
-
-                // Для изображений нужна vision модель
-                const visionModels = [
-                    // 'gemini-3.1-flash-lite-preview',
-                    'gemini-3-flash-preview'
-                ];
-                let lastErr: Error | null = null;
-
-                for (const modelName of visionModels) {
-                    try {
-                        console.log(`🤖 Vision модель: ${modelName}`);
-                        const vModel = genAI.getGenerativeModel({ model: modelName });
-
-                        const result = await vModel.generateContent([
-                            {
-                                inlineData: {
-                                    mimeType: mimeType as 'image/jpeg' | 'image/png' | 'image/webp',
-                                    data: base64Image,
-                                },
-                            },
-                            `${langInstruction}
-Ты судья челленджа. Оцени выполнение задачи по фото.
-Задача: ${taskTitle}
-Описание: ${taskDescription}
-Верни ТОЛЬКО JSON без markdown:
-{"score": 85, "comment": "Комментарий", "isCompleted": true}
-score: от 0 до 100`,
-                        ]);
-
-                        const text = result.response.text();
-                        const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
-                        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-                        if (jsonMatch) return JSON.parse(jsonMatch[0]) as AIEvaluation;
-                        return JSON.parse(cleaned) as AIEvaluation;
-                    } catch (err: any) {
-                        console.error(`❌ Vision ${modelName}: ${err.message}`);
-                        lastErr = err;
-                    }
-                }
-                throw lastErr;
-            } catch (err: any) {
-                // Если фото анализ не работает — даём стандартную оценку
-                console.error('Photo analysis failed, using default:', err.message);
-                return { score: 75, comment: 'Фото получено! Хорошая работа 👍', isCompleted: true };
-            }
+            return parseModelJson<AIEvaluation>(result.response.text());
+          } catch {
+            // try next model
+          }
         }
+      } catch {
+        // fallback below
+      }
 
-        // Для видео — текстовая оценка
-        const prompt = `${langInstruction}
-Участник загрузил видео как доказательство задачи: ${taskTitle}.
-Дай положительную оценку.
-Верни ТОЛЬКО JSON без markdown: {"score": 80, "comment": "Видео принято!", "isCompleted": true}`;
+      return {
+        score: 75,
+        comment: '���� �������. ������� ������.',
+        isCompleted: true,
+      };
+    }
 
-        const text = await generateWithFallback(prompt);
-        const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        if (jsonMatch) return JSON.parse(jsonMatch[0]) as AIEvaluation;
-        return JSON.parse(cleaned) as AIEvaluation;
-    },
+    const prompt = `${langInstruction}
+Participant uploaded a video proof for task: ${taskTitle}.
+Task description: ${taskDescription}
+Give a positive short evaluation.
+Return only JSON: {"score":80,"comment":"...","isCompleted":true}`;
 
-    chat: async (
-        userMessage: string,
-        challengeContext: string,
-        language: string = 'ru'
-    ): Promise<string> => {
+    const text = await generateWithFallback(prompt);
+    return parseModelJson<AIEvaluation>(text);
+  },
 
-        const langInstruction =
-            language === 'kz' ? 'Жауапты қазақ тілінде бер.' :
-                language === 'en' ? 'Respond in English.' :
-                    'Отвечай на русском языке.';
+  chat: async (userMessage: string, challengeContext: string, language: string = 'ru'): Promise<string> => {
+    const langInstruction =
+      language === 'kz'
+        ? 'Reply in Kazakh.'
+        : language === 'en'
+        ? 'Reply in English.'
+        : 'Reply in Russian.';
 
-        const prompt = `${langInstruction}
-Ты помощник B&A Challenge. Контекст: ${challengeContext}
-Вопрос пользователя: ${userMessage}
-Дай краткий мотивирующий ответ (2-3 предложения).`;
+    const prompt = `${langInstruction}
+You are B&A Challenge assistant.
+Context: ${challengeContext}
+User message: ${userMessage}
+Reply in 2-3 short sentences.`;
 
-        return await generateWithFallback(prompt);
-    },
+    return generateWithFallback(prompt);
+  },
 };
