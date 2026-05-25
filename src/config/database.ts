@@ -1,23 +1,34 @@
 import { Sequelize } from 'sequelize';
 import { ENV } from './env';
 
-const sequelize = new Sequelize(
-  ENV.DB_NAME,
-  ENV.DB_USER,
-  ENV.DB_PASSWORD,
-  {
-    host: ENV.DB_HOST,
-    port: ENV.DB_PORT,
-    dialect: 'postgres',
-    logging: ENV.NODE_ENV === 'development' ? console.log : false,
-    pool: {
-      max: 10,
-      min: 0,
-      acquire: 30000,
-      idle: 10000,
-    },
-  }
-);
+const useSSL = Boolean(ENV.DATABASE_URL) || ENV.NODE_ENV === 'production';
+
+const commonConfig = {
+  dialect: 'postgres' as const,
+  logging: ENV.NODE_ENV === 'development' ? console.log : false,
+  pool: {
+    max: 10,
+    min: 0,
+    acquire: 30000,
+    idle: 10000,
+  },
+  dialectOptions: useSSL
+    ? {
+        ssl: {
+          require: true,
+          rejectUnauthorized: false,
+        },
+      }
+    : undefined,
+};
+
+const sequelize = ENV.DATABASE_URL
+  ? new Sequelize(ENV.DATABASE_URL, commonConfig)
+  : new Sequelize(ENV.DB_NAME, ENV.DB_USER, ENV.DB_PASSWORD, {
+      ...commonConfig,
+      host: ENV.DB_HOST,
+      port: ENV.DB_PORT,
+    });
 
 export const connectDB = async (): Promise<void> => {
   try {
