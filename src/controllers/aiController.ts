@@ -86,16 +86,18 @@ const savedTasks = await Task.bulkCreate(
             const { submissionId } = req.params;
             const { language } = req.body;
 
-            const submission = await Submission.findByPk(submissionId, {
-                include: [{ model: Task, as: 'task' }],
-            });
+            const submission = await Submission.findByPk(submissionId);
 
             if (!submission) {
                 res.status(404).json({ message: 'Сабмишен не найден' });
                 return;
             }
 
-            const task = (submission as any).task as Task;
+            const task = await Task.findByPk(submission.taskId);
+            if (!task) {
+                res.status(404).json({ message: '?????? ??? ????????? ?? ???????' });
+                return;
+            }
 
             console.log(`🤖 AI оценивает submission #${submissionId}`);
 
