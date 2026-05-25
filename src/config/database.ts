@@ -1,10 +1,12 @@
 import { Sequelize } from 'sequelize';
 import { ENV } from './env';
+const pg = require('pg');
 
 const useSSL = Boolean(ENV.DATABASE_URL) || ENV.NODE_ENV === 'production';
 
 const commonConfig = {
   dialect: 'postgres' as const,
+  dialectModule: pg,
   logging: ENV.NODE_ENV === 'development' ? console.log : false,
   pool: {
     max: 10,
