@@ -5,6 +5,36 @@ import { Challenge, Participant, Task, Submission } from '../models';
 import { aiService } from '../services/aiService';
 import { ENV } from '../config/env';
 
+const CHAT_CACHE_TTL_MS = 45_000;
+const CHAT_CACHE_MAX_ITEMS = 300;
+const chatCache = new Map<string, { reply: string; expiresAt: number }>();
+
+const buildChatCacheKey = (params: {
+  userId: number;
+  challengeId?: number;
+  language: string;
+  message: string;
+}): string => {
+  const normalizedMessage = params.message.trim().toLowerCase().replace(/\s+/g, ' ');
+  return `${params.userId}|${params.challengeId || 0}|${params.language}|${normalizedMessage}`;
+};
+
+const cleanupExpiredChatCache = () => {
+  const now = Date.now();
+  for (const [key, value] of chatCache.entries()) {
+    if (value.expiresAt <= now) chatCache.delete(key);
+  }
+};
+
+const setChatCache = (key: string, reply: string) => {
+  cleanupExpiredChatCache();
+  if (chatCache.size >= CHAT_CACHE_MAX_ITEMS) {
+    const firstKey = chatCache.keys().next().value;
+    if (firstKey) chatCache.delete(firstKey);
+  }
+  chatCache.set(key, { reply, expiresAt: Date.now() + CHAT_CACHE_TTL_MS });
+};
+
 const normalizeLanguage = (language: string = 'ru'): 'ru' | 'kz' | 'en' => {
   const lang = String(language || 'ru').toLowerCase();
   if (lang.startsWith('en')) return 'en';
@@ -125,8 +155,23 @@ export const aiController = {
         res.status(401).json({ message: 'Пользователь не авторизован' });
         return;
       }
+      if (!String(message || '').trim()) {
+        res.status(400).json({ message: 'Пустой запрос' });
+        return;
+      }
 
       const normalizedLanguage = normalizeLanguage(language);
+      const cacheKey = buildChatCacheKey({
+        userId,
+        challengeId: challengeId ? Number(challengeId) : undefined,
+        language: normalizedLanguage,
+        message: String(message || ''),
+      });
+      const cached = chatCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        res.json({ reply: cached.reply, cached: true });
+        return;
+      }
       const now = new Date();
       const weekLater = new Date(now);
       weekLater.setDate(weekLater.getDate() + 7);
@@ -240,7 +285,8 @@ export const aiController = {
         normalizedLanguage
       );
 
-      res.json({ reply });
+      setChatCache(cacheKey, reply);
+      res.json({ reply, cached: false });
     } catch (error: any) {
       console.error('AI chat error:', error.message);
 
