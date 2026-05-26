@@ -85,11 +85,57 @@ const buildPrizeInfo = (totalPool: number, participantCount: number) => {
     };
 };
 
+// Автофинализация просроченных челленджей.
+// Для serverless окружения: вызываем в API-потоке.
+const autoCompleteExpiredChallenges = async (): Promise<void> => {
+    try {
+        const now = new Date();
+
+        const expiredChallenges = await Challenge.findAll({
+            attributes: ['id', 'betAmount'],
+            where: {
+                status: { [Op.in]: ['active', 'pending'] },
+                endDate: { [Op.lt]: now },
+            },
+        });
+
+        if (expiredChallenges.length === 0) return;
+
+        for (const challenge of expiredChallenges) {
+            const [updatedRows] = await Challenge.update(
+                { status: 'completed' },
+                {
+                    where: {
+                        id: challenge.id,
+                        status: { [Op.in]: ['active', 'pending'] },
+                    },
+                }
+            );
+
+            if (updatedRows === 0) continue;
+
+            console.log(`🏁 Auto-complete challenge #${challenge.id}`);
+
+            if (challenge.betAmount > 0) {
+                await distributePrizePool(challenge.id);
+            }
+
+            setImmediate(async () => {
+                await deleteChallengFiles(challenge.id);
+            });
+        }
+    } catch (error: any) {
+        console.error('autoCompleteExpiredChallenges error:', error.message);
+    }
+};
+
 export const challengeController = {
 
     // GET /api/challenges/family
     getFamilyChallenges: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
+            await autoCompleteExpiredChallenges();
+
             const userId = req.user!.id;
             const { familyOwnerId } = req.query;
 
@@ -146,6 +192,8 @@ export const challengeController = {
     // GET /api/challenges
     getAll: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
+            await autoCompleteExpiredChallenges();
+
             const userId = req.user!.id;
             const challenges = await Challenge.findAll({
                 include: [
@@ -183,6 +231,8 @@ export const challengeController = {
     // GET /api/challenges/:id
     getById: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
+            await autoCompleteExpiredChallenges();
+
             const userId = req.user!.id;
             const challenge = await Challenge.findByPk(req.params.id, {
                 include: [
@@ -294,12 +344,19 @@ export const challengeController = {
     // POST /api/challenges/:id/join
     join: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
+            await autoCompleteExpiredChallenges();
+
             const challengeId = Number(req.params.id);
             const userId = req.user!.id;
 
             const challenge = await Challenge.findByPk(challengeId);
             if (!challenge) {
                 res.status(404).json({ message: 'Не найден' });
+                return;
+            }
+
+            if (challenge.status === 'completed' || challenge.status === 'cancelled') {
+                res.status(400).json({ message: 'Челлендж уже завершён' });
                 return;
             }
 
@@ -355,6 +412,8 @@ export const challengeController = {
     // GET /api/challenges/:id/tasks
     getTasks: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
+            await autoCompleteExpiredChallenges();
+
             const tasks = await Task.findAll({
                 where: { challengeId: req.params.id },
                 order: [['day', 'ASC']],
