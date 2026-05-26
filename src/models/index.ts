@@ -10,6 +10,8 @@ import FamilyInvite from './FamilyInvite';
 import ChallengeInvite from './ChallengeInvite';
 import Message from './Message';
 import Notification from './Notification';
+import StreakRewardLog from './StreakRewardLog';
+import SpinHistory from './SpinHistory';
 
 
 
@@ -56,9 +58,13 @@ ChallengeInvite.belongsTo(User, { foreignKey: 'fromUserId', as: 'inviteSender' }
 ChallengeInvite.belongsTo(User, { foreignKey: 'toUserId', as: 'inviteReceiver' });
 User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications' });
 Notification.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(StreakRewardLog, { foreignKey: 'userId', as: 'streakRewardLogs' });
+StreakRewardLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(SpinHistory, { foreignKey: 'userId', as: 'spinHistory' });
+SpinHistory.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 export {
   User, Challenge, Participant, Task, Submission,
   Vote, FamilyMember, FamilyEvent, FamilyInvite,
-  ChallengeInvite, Message, Notification
+  ChallengeInvite, Message, Notification, StreakRewardLog, SpinHistory
 };

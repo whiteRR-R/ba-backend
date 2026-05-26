@@ -1,4 +1,4 @@
-import { DataTypes, Model, Optional } from 'sequelize';
+﻿import { DataTypes, Model, Optional } from 'sequelize';
 import sequelize from '../config/database';
 import { UserRole } from '../types';
 
@@ -11,14 +11,30 @@ interface UserAttributes {
   rating: number;
   rikonCoins: number;
   avatarUrl?: string;
-  // ✅ Приватность
+  streakCount: number;
+  bestStreak: number;
+  streakLastDate?: string | null;
+  nextFreeSpinAt?: Date | null;
   showChallengesPublic?: boolean;
   allowFamilyInvites?: boolean;
   allowChallengeInvites?: boolean;
 }
 
 interface UserCreationAttributes
-  extends Optional<UserAttributes, 'id' | 'rating' | 'rikonCoins' | 'showChallengesPublic' | 'allowFamilyInvites' | 'allowChallengeInvites'> { }
+  extends Optional<
+    UserAttributes,
+    | 'id'
+    | 'rating'
+    | 'rikonCoins'
+    | 'avatarUrl'
+    | 'streakCount'
+    | 'bestStreak'
+    | 'streakLastDate'
+    | 'nextFreeSpinAt'
+    | 'showChallengesPublic'
+    | 'allowFamilyInvites'
+    | 'allowChallengeInvites'
+  > {}
 
 class User extends Model<UserAttributes, UserCreationAttributes>
   implements UserAttributes {
@@ -30,6 +46,10 @@ class User extends Model<UserAttributes, UserCreationAttributes>
   public rating!: number;
   public rikonCoins!: number;
   public avatarUrl?: string;
+  public streakCount!: number;
+  public bestStreak!: number;
+  public streakLastDate?: string | null;
+  public nextFreeSpinAt?: Date | null;
   public showChallengesPublic?: boolean;
   public allowFamilyInvites?: boolean;
   public allowChallengeInvites?: boolean;
@@ -50,8 +70,10 @@ User.init(
     rating: { type: DataTypes.INTEGER, defaultValue: 0 },
     rikonCoins: { type: DataTypes.INTEGER, defaultValue: 100 },
     avatarUrl: { type: DataTypes.STRING(500), allowNull: true },
-
-    // ✅ Приватность (3 поля, без showRatingPublic)
+    streakCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    bestStreak: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    streakLastDate: { type: DataTypes.STRING(10), allowNull: true },
+    nextFreeSpinAt: { type: DataTypes.DATE, allowNull: true },
     showChallengesPublic: { type: DataTypes.BOOLEAN, defaultValue: true },
     allowFamilyInvites: { type: DataTypes.BOOLEAN, defaultValue: true },
     allowChallengeInvites: { type: DataTypes.BOOLEAN, defaultValue: true },

@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import fs from 'fs';
 import { AuthRequest } from '../types';
-import { User, Submission, Vote, Participant, Task, Challenge } from '../models';
+import { User, Submission, Vote, Participant, Challenge } from '../models';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
 export const userController = {
@@ -45,6 +45,10 @@ export const userController = {
     const userId = req.user!.id;
     console.log(`📊 getStats для userId: ${userId}`);
 
+    const user = await User.findByPk(userId, {
+      attributes: ['id', 'streakCount', 'bestStreak', 'streakLastDate', 'nextFreeSpinAt'],
+    });
+
     const submissions = await Submission.findAll({
       where: { userId },
       attributes: ['id', 'score', 'createdAt'],
@@ -56,7 +60,8 @@ export const userController = {
     let avgRating      = 0;
     let totalVoters    = 0;
     let totalVoteCount = 0;
-    let streakCount    = 0;
+    const streakCount = user?.streakCount || 0;
+    const bestStreak = user?.bestStreak || 0;
 
     if (submissionIds.length > 0) {
       const votes = await Vote.findAll({
@@ -74,25 +79,6 @@ avgRating = votes.length > 0
     ) / 100
   : 0;
 
-      // Streak: consecutive active days based on submission creation dates.
-      const dayKeys = new Set(
-        submissions.map((s: any) => new Date(s.createdAt).toISOString().slice(0, 10))
-      );
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
-
-      for (let i = 0; i < 3650; i++) {
-        const d = new Date(today);
-        d.setUTCDate(today.getUTCDate() - i);
-        const key = d.toISOString().slice(0, 10);
-        if (dayKeys.has(key)) {
-          streakCount++;
-        } else {
-          // allow streak to start yesterday if user had no submission today
-          if (i === 0) continue;
-          break;
-        }
-      }
     }
 
     const challengeCount = await Participant.count({ where: { userId } });
@@ -122,6 +108,9 @@ avgRating = votes.length > 0
       wonCount,
       submissionCount: submissions.length,
       streakCount,
+      bestStreak,
+      streakLastDate: user?.streakLastDate || null,
+      nextFreeSpinAt: user?.nextFreeSpinAt || null,
     };
 
     console.log('📊 Результат stats:', result);
