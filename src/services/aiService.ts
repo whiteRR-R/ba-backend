@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+п»їimport { GoogleGenerativeAI } from '@google/generative-ai';
 import { ENV } from '../config/env';
 
 const genAI = new GoogleGenerativeAI(ENV.ANTHROPIC_API_KEY);
@@ -28,7 +28,14 @@ const MODEL_FALLBACKS = [
 ];
 
 const getModel = (modelName: string = MODEL_FALLBACKS[0]) =>
-  genAI.getGenerativeModel({ model: modelName });
+  genAI.getGenerativeModel({
+    model: modelName,
+    generationConfig: {
+      temperature: 0.3,
+      topP: 0.8,
+      maxOutputTokens: 220,
+    },
+  });
 
 const getRetryDelay = (errorMessage: string): number => {
   const match = errorMessage.match(/Please retry in (\d+)/);
@@ -89,6 +96,13 @@ const parseModelJson = <T>(text: string): T => {
   return JSON.parse(match ? match[0] : cleaned) as T;
 };
 
+const normalizeLanguage = (language: string = 'ru'): 'ru' | 'kz' | 'en' => {
+  const lang = String(language || 'ru').toLowerCase();
+  if (lang.startsWith('en')) return 'en';
+  if (lang.startsWith('kz') || lang.startsWith('kk')) return 'kz';
+  return 'ru';
+};
+
 export const aiService = {
   generateTasks: async (
     challengeTitle: string,
@@ -114,10 +128,11 @@ export const aiService = {
       });
     }
 
+    const normalizedLanguage = normalizeLanguage(language);
     const langInstruction =
-      language === 'kz'
+      normalizedLanguage === 'kz'
         ? 'Reply in Kazakh.'
-        : language === 'en'
+        : normalizedLanguage === 'en'
         ? 'Reply in English.'
         : 'Reply in Russian.';
 
@@ -156,10 +171,11 @@ Return exactly ${taskCount} items in tasks.`;
     mediaType: 'photo' | 'video',
     language: string = 'ru'
   ): Promise<AIEvaluation> => {
+    const normalizedLanguage = normalizeLanguage(language);
     const langInstruction =
-      language === 'kz'
+      normalizedLanguage === 'kz'
         ? 'Reply in Kazakh.'
-        : language === 'en'
+        : normalizedLanguage === 'en'
         ? 'Reply in English.'
         : 'Reply in Russian.';
 
@@ -199,7 +215,7 @@ score must be 0..100`,
 
       return {
         score: 75,
-        comment: 'Фото принято. Хорошая работа.',
+        comment: 'Р¤РѕС‚Рѕ РїСЂРёРЅСЏС‚Рѕ. РҐРѕСЂРѕС€Р°СЏ СЂР°Р±РѕС‚Р°.',
         isCompleted: true,
       };
     }
@@ -215,20 +231,24 @@ Return only JSON: {"score":80,"comment":"...","isCompleted":true}`;
   },
 
   chat: async (userMessage: string, challengeContext: string, language: string = 'ru'): Promise<string> => {
+    const normalizedLanguage = normalizeLanguage(language);
     const langInstruction =
-      language === 'kz'
+      normalizedLanguage === 'kz'
         ? 'Reply in Kazakh.'
-        : language === 'en'
+        : normalizedLanguage === 'en'
         ? 'Reply in English.'
         : 'Reply in Russian.';
 
     const prompt = `${langInstruction}
 You are B&A Challenge assistant.
+Answer only using this user data context. If data is missing, clearly say it's not found in context.
+Keep response concise:
+- max 3 short bullet points
+- max 320 characters total
+- no intro and no outro
 Context: ${challengeContext}
-User message: ${userMessage}
-Reply in 2-3 short sentences.`;
+User message: ${userMessage}`;
 
     return generateWithFallback(prompt);
   },
 };
-
