@@ -9,6 +9,105 @@ const CHAT_CACHE_TTL_MS = 45_000;
 const CHAT_CACHE_MAX_ITEMS = 300;
 const chatCache = new Map<string, { reply: string; expiresAt: number }>();
 
+const decodeUnicodeEscapes = (value: string): string =>
+  value.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) =>
+    String.fromCharCode(parseInt(hex, 16))
+  );
+
+const getFallbackChatReply = (language: 'ru' | 'kz' | 'en'): string => {
+  if (language === 'kz') {
+    return 'Белсенді челлендждер бойынша нақты дерек табылмады. Челлендж атауын немесе кезеңін нақтыласаңыз, жауапты дәлірек етемін. Алдымен мерзімі жақын тапсырмаларға назар аударыңыз. Дәл осы қадам прогрессті тұрақты ұстауға көмектеседі.';
+  }
+  if (language === 'en') {
+    return 'No detailed challenge data was found in the current context. Please specify the challenge name or period so I can answer more precisely. Start with tasks that are closest to their deadlines. This step usually gives the fastest progress improvement.';
+  }
+  return 'Подробные данные по челленджам в текущем контексте не найдены. Уточни название челленджа или период, и я дам более точный ответ. Начни с задач с ближайшими дедлайнами. Это обычно дает самый быстрый прирост прогресса.';
+};
+
+const toMediumParagraphReply = (value: string, language: 'ru' | 'kz' | 'en'): string => {
+  const sentences = value
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const cleaned = sentences
+    .map((s) =>
+      s
+        .replace(/^[*•\-–—\s"'`]+/, '')
+        .replace(/[*•\-–—\s"'`]+$/, '')
+        .trim()
+    )
+    .filter((s) => s.length > 1);
+
+  if (!cleaned.length) return getFallbackChatReply(language);
+
+  const selected = cleaned.slice(0, 5);
+  if (selected.length >= 4) return selected.join(' ');
+
+  const fallbackTail =
+    language === 'kz'
+      ? [
+          'Қажет болса, челлендж атауын нақтылап беріңіз.',
+          'Сонда келесі қадамдарды қысқа жоспармен ұсынамын.',
+          'Алдымен ең жақын дедлайннан бастаған дұрыс.',
+        ]
+      : language === 'en'
+      ? [
+          'If needed, specify the challenge name for a more exact answer.',
+          'Then I will suggest a short next-step plan.',
+          'It is best to start from the nearest deadline first.',
+        ]
+      : [
+          'При необходимости уточни название челленджа для более точного ответа.',
+          'После этого я предложу короткий план следующих шагов.',
+          'Лучше всего начать с ближайшего дедлайна.',
+        ];
+
+  while (selected.length < 4) {
+    selected.push(fallbackTail[selected.length - cleaned.length] || fallbackTail[fallbackTail.length - 1]);
+  }
+
+  return selected.slice(0, 5).join(' ');
+};
+
+const normalizeChatReply = (raw: unknown, language: 'ru' | 'kz' | 'en'): string => {
+  let text = String(raw ?? '').trim();
+  if (!text) return getFallbackChatReply(language);
+
+  // Sometimes model returns a JSON object/string as text; unwrap it first.
+  if (text.startsWith('{') && text.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed === 'string') text = parsed;
+      else if (parsed && typeof parsed.reply === 'string') text = parsed.reply;
+      else if (parsed && typeof parsed.text === 'string') text = parsed.text;
+    } catch {
+      // keep original text
+    }
+  }
+
+  if (text.startsWith('"') && text.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed === 'string') text = parsed;
+    } catch {
+      // keep original text
+    }
+  }
+
+  text = decodeUnicodeEscapes(text)
+    .replace(/\\n/g, ' ')
+    .replace(/\\r/g, ' ')
+    .replace(/\\t/g, ' ')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
+    .replace(/^[`'"*•\-–—\s]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return toMediumParagraphReply(text, language);
+};
+
 const buildChatCacheKey = (params: {
   userId: number;
   challengeId?: number;
@@ -285,8 +384,9 @@ export const aiController = {
         normalizedLanguage
       );
 
-      setChatCache(cacheKey, reply);
-      res.json({ reply, cached: false });
+      const cleanReply = normalizeChatReply(reply, normalizedLanguage);
+      setChatCache(cacheKey, cleanReply);
+      res.json({ reply: cleanReply, cached: false });
     } catch (error: any) {
       console.error('AI chat error:', error.message);
 

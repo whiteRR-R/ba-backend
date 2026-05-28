@@ -349,9 +349,12 @@ Return only JSON: {"score":80,"comment":"...","isCompleted":true}`;
     const prompt = `${langInstruction}
 You are B&A Challenge assistant.
 Answer only using this user data context. If data is missing, clearly say it's not found in context.
-Keep response concise:
-- max 3 short bullet points
-- max 320 characters total
+Strict format:
+- exactly 4-5 medium sentences
+- around 420-650 characters total
+- plain text only (no JSON, no markdown, no bullets)
+- never start with "*" or "-"
+- include concrete facts from context (challenge titles, counts, ближайшие сроки)
 - no intro and no outro
 Context: ${challengeContext}
 User message: ${userMessage}`;
