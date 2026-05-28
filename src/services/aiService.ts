@@ -27,13 +27,22 @@ const MODEL_FALLBACKS = [
   'gemini-3-flash-preview',
 ];
 
-const getModel = (modelName: string = MODEL_FALLBACKS[0]) =>
+type ModelRunOptions = {
+  temperature?: number;
+  topP?: number;
+  maxOutputTokens?: number;
+};
+
+const getModel = (
+  modelName: string = MODEL_FALLBACKS[0],
+  options: ModelRunOptions = {}
+) =>
   genAI.getGenerativeModel({
     model: modelName,
     generationConfig: {
-      temperature: 0.3,
-      topP: 0.8,
-      maxOutputTokens: 220,
+      temperature: options.temperature ?? 0.3,
+      topP: options.topP ?? 0.8,
+      maxOutputTokens: options.maxOutputTokens ?? 320,
     },
   });
 
@@ -55,12 +64,15 @@ const isTransientModelError = (message: string = ''): boolean => {
   );
 };
 
-const generateWithFallback = async (prompt: string): Promise<string> => {
+const generateWithFallback = async (
+  prompt: string,
+  options: ModelRunOptions = {}
+): Promise<string> => {
   let lastError: Error | null = null;
 
   for (const modelName of MODEL_FALLBACKS) {
     try {
-      const m = getModel(modelName);
+      const m = getModel(modelName, options);
       const result = await m.generateContent(prompt);
       return result.response.text();
     } catch (err: any) {
@@ -75,7 +87,7 @@ const generateWithFallback = async (prompt: string): Promise<string> => {
         await sleep(delay);
 
         try {
-          const m = getModel(modelName);
+          const m = getModel(modelName, options);
           const retryResult = await m.generateContent(prompt);
           return retryResult.response.text();
         } catch (retryErr: any) {
@@ -90,10 +102,95 @@ const generateWithFallback = async (prompt: string): Promise<string> => {
   );
 };
 
+const extractBalancedJsonObject = (input: string): string | null => {
+  const start = input.indexOf('{');
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let quoteChar: '"' | "'" | null = null;
+  let escaped = false;
+
+  for (let i = start; i < input.length; i++) {
+    const ch = input[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === quoteChar) {
+        inString = false;
+        quoteChar = null;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quoteChar = ch as '"' | "'";
+      continue;
+    }
+
+    if (ch === '{') depth++;
+    if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return input.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+};
+
+const normalizeJsonLikeText = (input: string): string => {
+  return input
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/,\s*([}\]])/g, '$1');
+};
+
+const singleToDoubleQuotes = (input: string): string => {
+  return input
+    .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, group) => {
+      const content = String(group)
+        .replace(/"/g, '\\"')
+        .replace(/\\'/g, "'");
+      return `"${content}"`;
+    })
+    .replace(/([{,]\s*)'([^']+?)'(\s*:)/g, '$1"$2"$3');
+};
+
 const parseModelJson = <T>(text: string): T => {
-  const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  return JSON.parse(match ? match[0] : cleaned) as T;
+  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const extracted = extractBalancedJsonObject(cleaned);
+
+  const candidates = [
+    cleaned,
+    extracted ?? '',
+    normalizeJsonLikeText(cleaned),
+    extracted ? normalizeJsonLikeText(extracted) : '',
+    singleToDoubleQuotes(normalizeJsonLikeText(cleaned)),
+    extracted ? singleToDoubleQuotes(normalizeJsonLikeText(extracted)) : '',
+  ].filter(Boolean);
+
+  let lastError: any = null;
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as T;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+
+  throw new Error(
+    `Failed to parse model JSON: ${lastError?.message || 'Unknown parse error'} | raw=${cleaned.slice(0, 240)}`
+  );
 };
 
 const normalizeLanguage = (language: string = 'ru'): 'ru' | 'kz' | 'en' => {
@@ -151,17 +248,27 @@ Return only JSON (no markdown):
 }
 Return exactly ${taskCount} items in tasks.`;
 
-    const text = await generateWithFallback(prompt);
+    const text = await generateWithFallback(prompt, { maxOutputTokens: 1400, temperature: 0.35, topP: 0.9 });
     const parsed = parseModelJson<{ tasks: Array<{ title: string; description: string }>; summary: string }>(text);
 
-    const tasks = parsed.tasks.slice(0, taskCount).map((t, i) => ({
+    const sourceTasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+    if (sourceTasks.length === 0) {
+      throw new Error(`AI returned empty tasks array | raw=${text.slice(0, 240)}`);
+    }
+
+    const tasks = sourceTasks.slice(0, taskCount).map((t, i) => ({
       title: t.title,
       description: t.description,
       day: deadlines[i].day,
       deadline: deadlines[i].deadline,
     }));
 
-    return { tasks, summary: parsed.summary };
+    const summary =
+      typeof parsed?.summary === 'string' && parsed.summary.trim().length > 0
+        ? parsed.summary
+        : 'AI generated tasks successfully.';
+
+    return { tasks, summary };
   },
 
   evaluateSubmission: async (
@@ -226,7 +333,7 @@ Task description: ${taskDescription}
 Give a positive short evaluation.
 Return only JSON: {"score":80,"comment":"...","isCompleted":true}`;
 
-    const text = await generateWithFallback(prompt);
+    const text = await generateWithFallback(prompt, { maxOutputTokens: 260, temperature: 0.25, topP: 0.8 });
     return parseModelJson<AIEvaluation>(text);
   },
 
@@ -249,6 +356,6 @@ Keep response concise:
 Context: ${challengeContext}
 User message: ${userMessage}`;
 
-    return generateWithFallback(prompt);
+    return generateWithFallback(prompt, { maxOutputTokens: 220, temperature: 0.2, topP: 0.75 });
   },
 };
