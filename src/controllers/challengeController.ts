@@ -1,12 +1,14 @@
-import { Response } from 'express';
+﻿import { Response } from 'express';
 import { Op } from 'sequelize';
 import { AuthRequest } from '../types';
 import { Challenge, Participant, Task, User, ChallengeInvite, FamilyMember } from '../models';
 import { deleteChallengFiles } from '../utils/cleanupFiles';
+import { completeChallengeWithPayout } from '../services/challengeCompletionService';
+import { logCoinTransaction } from '../services/coinTransactionService';
 
-// ─────────────────────────────────────────────────────────────
-// Вспомогательная функция — распределение призового пула
-// ─────────────────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅР°СЏ С„СѓРЅРєС†РёСЏ вЂ” СЂР°СЃРїСЂРµРґРµР»РµРЅРёРµ РїСЂРёР·РѕРІРѕРіРѕ РїСѓР»Р°
+// в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 const distributePrizePool = async (challengeId: number): Promise<void> => {
     try {
         const challenge = await Challenge.findByPk(challengeId);
@@ -21,8 +23,8 @@ const distributePrizePool = async (challengeId: number): Promise<void> => {
 
         const totalPool = challenge.betAmount * participants.length;
 
-        console.log(`💰 Призовой пул челленджа #${challengeId}: ${totalPool} монет`);
-        console.log(`👥 Участников: ${participants.length}`);
+        console.log(`рџ’° РџСЂРёР·РѕРІРѕР№ РїСѓР» С‡РµР»Р»РµРЅРґР¶Р° #${challengeId}: ${totalPool} РјРѕРЅРµС‚`);
+        console.log(`рџ‘Ґ РЈС‡Р°СЃС‚РЅРёРєРѕРІ: ${participants.length}`);
 
         const prizes: { userId: number; prize: number; place: number }[] = [];
 
@@ -39,18 +41,18 @@ const distributePrizePool = async (challengeId: number): Promise<void> => {
 
         for (const { userId, prize, place } of prizes) {
             await User.increment('rikonCoins', { by: prize, where: { id: userId } });
-            console.log(`🏆 Место #${place}: userId ${userId} получает ${prize} монет`);
+            console.log(`рџЏ† РњРµСЃС‚Рѕ #${place}: userId ${userId} РїРѕР»СѓС‡Р°РµС‚ ${prize} РјРѕРЅРµС‚`);
         }
 
-        console.log(`✅ Призовой пул распределён для челленджа #${challengeId}`);
+        console.log(`вњ… РџСЂРёР·РѕРІРѕР№ РїСѓР» СЂР°СЃРїСЂРµРґРµР»С‘РЅ РґР»СЏ С‡РµР»Р»РµРЅРґР¶Р° #${challengeId}`);
     } catch (error: any) {
         console.error('distributePrizePool error:', error.message);
     }
 };
 
-// ─────────────────────────────────────────────────────────────
-// Вспомогательная функция — формат призового пула для ответа
-// ─────────────────────────────────────────────────────────────
+// в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅР°СЏ С„СѓРЅРєС†РёСЏ вЂ” С„РѕСЂРјР°С‚ РїСЂРёР·РѕРІРѕРіРѕ РїСѓР»Р° РґР»СЏ РѕС‚РІРµС‚Р°
+// в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 const buildPrizeInfo = (totalPool: number, participantCount: number) => {
     if (participantCount === 0 || totalPool === 0) {
         return { totalPool: 0, prizes: [] };
@@ -60,7 +62,7 @@ const buildPrizeInfo = (totalPool: number, participantCount: number) => {
         return {
             totalPool,
             prizes: [
-                { place: 1, percent: 100, amount: totalPool, label: '🥇 1 место' },
+                { place: 1, percent: 100, amount: totalPool, label: 'рџҐ‡ 1 РјРµСЃС‚Рѕ' },
             ],
         };
     }
@@ -69,8 +71,8 @@ const buildPrizeInfo = (totalPool: number, participantCount: number) => {
         return {
             totalPool,
             prizes: [
-                { place: 1, percent: 70, amount: Math.floor(totalPool * 0.7), label: '🥇 1 место' },
-                { place: 2, percent: 30, amount: Math.floor(totalPool * 0.3), label: '🥈 2 место' },
+                { place: 1, percent: 70, amount: Math.floor(totalPool * 0.7), label: 'рџҐ‡ 1 РјРµСЃС‚Рѕ' },
+                { place: 2, percent: 30, amount: Math.floor(totalPool * 0.3), label: 'рџҐ€ 2 РјРµСЃС‚Рѕ' },
             ],
         };
     }
@@ -78,15 +80,15 @@ const buildPrizeInfo = (totalPool: number, participantCount: number) => {
     return {
         totalPool,
         prizes: [
-            { place: 1, percent: 50, amount: Math.floor(totalPool * 0.5), label: '🥇 1 место' },
-            { place: 2, percent: 30, amount: Math.floor(totalPool * 0.3), label: '🥈 2 место' },
-            { place: 3, percent: 20, amount: Math.floor(totalPool * 0.2), label: '🥉 3 место' },
+            { place: 1, percent: 50, amount: Math.floor(totalPool * 0.5), label: 'рџҐ‡ 1 РјРµСЃС‚Рѕ' },
+            { place: 2, percent: 30, amount: Math.floor(totalPool * 0.3), label: 'рџҐ€ 2 РјРµСЃС‚Рѕ' },
+            { place: 3, percent: 20, amount: Math.floor(totalPool * 0.2), label: 'рџҐ‰ 3 РјРµСЃС‚Рѕ' },
         ],
     };
 };
 
-// Автофинализация просроченных челленджей.
-// Для serverless окружения: вызываем в API-потоке.
+// РђРІС‚РѕС„РёРЅР°Р»РёР·Р°С†РёСЏ РїСЂРѕСЃСЂРѕС‡РµРЅРЅС‹С… С‡РµР»Р»РµРЅРґР¶РµР№.
+// Р”Р»СЏ serverless РѕРєСЂСѓР¶РµРЅРёСЏ: РІС‹Р·С‹РІР°РµРј РІ API-РїРѕС‚РѕРєРµ.
 const autoCompleteExpiredChallenges = async (): Promise<void> => {
     try {
         const now = new Date();
@@ -102,24 +104,10 @@ const autoCompleteExpiredChallenges = async (): Promise<void> => {
         if (expiredChallenges.length === 0) return;
 
         for (const challenge of expiredChallenges) {
-            const [updatedRows] = await Challenge.update(
-                { status: 'completed' },
-                {
-                    where: {
-                        id: challenge.id,
-                        status: { [Op.in]: ['active', 'pending'] },
-                    },
-                }
-            );
+            const completion = await completeChallengeWithPayout(challenge.id);
+            if (!completion.ok) continue;
 
-            if (updatedRows === 0) continue;
-
-            console.log(`🏁 Auto-complete challenge #${challenge.id}`);
-
-            if (challenge.betAmount > 0) {
-                await distributePrizePool(challenge.id);
-            }
-
+            console.log(`Auto-complete challenge #${challenge.id}`);
             setImmediate(async () => {
                 await deleteChallengFiles(challenge.id);
             });
@@ -150,7 +138,7 @@ export const challengeController = {
                         where: { userId: ownerId, appUserId: userId },
                     });
                     if (!membership) {
-                        res.status(403).json({ message: 'Нет доступа к этой семье' });
+                        res.status(403).json({ message: 'РќРµС‚ РґРѕСЃС‚СѓРїР° Рє СЌС‚РѕР№ СЃРµРјСЊРµ' });
                         return;
                     }
                     ownerIds = [ownerId];
@@ -185,7 +173,7 @@ export const challengeController = {
             res.json(result);
         } catch (error: any) {
             console.error('getFamilyChallenges error:', error.message);
-            res.status(500).json({ message: 'Ошибка: ' + error.message });
+            res.status(500).json({ message: 'РћС€РёР±РєР°: ' + error.message });
         }
     },
 
@@ -224,7 +212,7 @@ export const challengeController = {
 
             res.json(result);
         } catch (error) {
-            res.status(500).json({ message: 'Ошибка' });
+            res.status(500).json({ message: 'РћС€РёР±РєР°' });
         }
     },
 
@@ -247,7 +235,7 @@ export const challengeController = {
             });
 
             if (!challenge) {
-                res.status(404).json({ message: 'Челлендж не найден' });
+                res.status(404).json({ message: 'Р§РµР»Р»РµРЅРґР¶ РЅРµ РЅР°Р№РґРµРЅ' });
                 return;
             }
 
@@ -257,7 +245,7 @@ export const challengeController = {
                 });
                 const isOwner = challenge.familyOwnerId === userId;
                 if (!isOwner && !isFamilyMember) {
-                    res.status(403).json({ message: 'Нет доступа к этому семейному челленджу' });
+                    res.status(403).json({ message: 'РќРµС‚ РґРѕСЃС‚СѓРїР° Рє СЌС‚РѕРјСѓ СЃРµРјРµР№РЅРѕРјСѓ С‡РµР»Р»РµРЅРґР¶Сѓ' });
                     return;
                 }
             }
@@ -272,7 +260,7 @@ export const challengeController = {
                 prizeInfo,
             });
         } catch (error) {
-            res.status(500).json({ message: 'Ошибка' });
+            res.status(500).json({ message: 'РћС€РёР±РєР°' });
         }
     },
 
@@ -287,7 +275,7 @@ export const challengeController = {
 
             if (familyOwnerId && Number(familyOwnerId) !== creatorId) {
                 res.status(403).json({
-                    message: 'Только владелец семьи может создавать семейные челленджи',
+                    message: 'РўРѕР»СЊРєРѕ РІР»Р°РґРµР»РµС† СЃРµРјСЊРё РјРѕР¶РµС‚ СЃРѕР·РґР°РІР°С‚СЊ СЃРµРјРµР№РЅС‹Рµ С‡РµР»Р»РµРЅРґР¶Рё',
                 });
                 return;
             }
@@ -296,7 +284,7 @@ export const challengeController = {
                 const creator = await User.findByPk(creatorId);
                 if (!creator || creator.rikonCoins < betAmount) {
                     res.status(400).json({
-                        message: `Недостаточно монет. У тебя ${creator?.rikonCoins ?? 0} 🪙`,
+                        message: `РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РјРѕРЅРµС‚. РЈ С‚РµР±СЏ ${creator?.rikonCoins ?? 0} рџЄ™`,
                     });
                     return;
                 }
@@ -319,6 +307,13 @@ export const challengeController = {
 
             if (betAmount > 0) {
                 await User.decrement('rikonCoins', { by: betAmount, where: { id: creatorId } });
+                await logCoinTransaction({
+                    userId: creatorId,
+                    amount: -challenge.betAmount,
+                    kind: 'challenge_bet',
+                    description: 'Challenge bet on challenge creation',
+                    challengeId: challenge.id,
+                });
             }
 
             const full = await Challenge.findByPk(challenge.id, {
@@ -337,7 +332,7 @@ export const challengeController = {
 
             res.status(201).json({ ...(full as any).toJSON(), prizePool, prizeInfo });
         } catch (error) {
-            res.status(500).json({ message: 'Ошибка создания челленджа' });
+            res.status(500).json({ message: 'РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ С‡РµР»Р»РµРЅРґР¶Р°' });
         }
     },
 
@@ -351,12 +346,12 @@ export const challengeController = {
 
             const challenge = await Challenge.findByPk(challengeId);
             if (!challenge) {
-                res.status(404).json({ message: 'Не найден' });
+                res.status(404).json({ message: 'РќРµ РЅР°Р№РґРµРЅ' });
                 return;
             }
 
             if (challenge.status === 'completed' || challenge.status === 'cancelled') {
-                res.status(400).json({ message: 'Челлендж уже завершён' });
+                res.status(400).json({ message: 'Р§РµР»Р»РµРЅРґР¶ СѓР¶Рµ Р·Р°РІРµСЂС€С‘РЅ' });
                 return;
             }
 
@@ -366,14 +361,14 @@ export const challengeController = {
                 });
                 const isOwner = challenge.familyOwnerId === userId;
                 if (!isOwner && !isMember) {
-                    res.status(403).json({ message: 'Только члены семьи могут участвовать' });
+                    res.status(403).json({ message: 'РўРѕР»СЊРєРѕ С‡Р»РµРЅС‹ СЃРµРјСЊРё РјРѕРіСѓС‚ СѓС‡Р°СЃС‚РІРѕРІР°С‚СЊ' });
                     return;
                 }
             }
 
             const existing = await Participant.findOne({ where: { challengeId, userId } });
             if (existing) {
-                res.status(400).json({ message: 'Уже участвуешь' });
+                res.status(400).json({ message: 'РЈР¶Рµ СѓС‡Р°СЃС‚РІСѓРµС€СЊ' });
                 return;
             }
 
@@ -381,7 +376,7 @@ export const challengeController = {
                 const user = await User.findByPk(userId);
                 if (!user || user.rikonCoins < challenge.betAmount) {
                     res.status(400).json({
-                        message: `Недостаточно монет. Нужно ${challenge.betAmount} 🪙, у тебя ${user?.rikonCoins ?? 0} 🪙`,
+                        message: `РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РјРѕРЅРµС‚. РќСѓР¶РЅРѕ ${challenge.betAmount} рџЄ™, Сѓ С‚РµР±СЏ ${user?.rikonCoins ?? 0} рџЄ™`,
                     });
                     return;
                 }
@@ -391,6 +386,13 @@ export const challengeController = {
 
             if (challenge.betAmount > 0) {
                 await User.decrement('rikonCoins', { by: challenge.betAmount, where: { id: userId } });
+                await logCoinTransaction({
+                    userId,
+                    amount: -challenge.betAmount,
+                    kind: 'challenge_bet',
+                    description: 'Challenge bet on join',
+                    challengeId: challengeId,
+                });
             }
 
             const participantCount = await Participant.count({ where: { challengeId } });
@@ -399,13 +401,13 @@ export const challengeController = {
 
             res.json({
                 message: challenge.betAmount > 0
-                    ? `🎉 Ты в игре! ${challenge.betAmount} 🪙 добавлены в призовой пул.`
-                    : '🎉 Ты вступил в челлендж!',
+                    ? `рџЋ‰ РўС‹ РІ РёРіСЂРµ! ${challenge.betAmount} рџЄ™ РґРѕР±Р°РІР»РµРЅС‹ РІ РїСЂРёР·РѕРІРѕР№ РїСѓР».`
+                    : 'рџЋ‰ РўС‹ РІСЃС‚СѓРїРёР» РІ С‡РµР»Р»РµРЅРґР¶!',
                 prizePool: totalPool,
                 prizeInfo,
             });
         } catch (error) {
-            res.status(500).json({ message: 'Ошибка' });
+            res.status(500).json({ message: 'РћС€РёР±РєР°' });
         }
     },
 
@@ -414,66 +416,79 @@ export const challengeController = {
         try {
             await autoCompleteExpiredChallenges();
 
+            const challenge = await Challenge.findByPk(req.params.id, {
+                attributes: ['id', 'status'],
+            });
+            if (!challenge) {
+                res.status(404).json({ message: 'Челлендж не найден' });
+                return;
+            }
+            if (challenge.status === 'completed' || challenge.status === 'cancelled') {
+                res.status(403).json({ message: 'Челлендж завершён, доступ к задачам закрыт' });
+                return;
+            }
+
             const tasks = await Task.findAll({
                 where: { challengeId: req.params.id },
                 order: [['day', 'ASC']],
             });
             res.json(tasks);
         } catch (error) {
-            res.status(500).json({ message: 'Ошибка' });
+            res.status(500).json({ message: 'РћС€РёР±РєР°' });
         }
     },
 
-    // ✅ PATCH /api/challenges/:id/status
-    // Обновлён: при завершении удаляет файлы сабмишенов
+    // вњ… PATCH /api/challenges/:id/status
+    // РћР±РЅРѕРІР»С‘РЅ: РїСЂРё Р·Р°РІРµСЂС€РµРЅРёРё СѓРґР°Р»СЏРµС‚ С„Р°Р№Р»С‹ СЃР°Р±РјРёС€РµРЅРѕРІ
     updateStatus: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
             const { status } = req.body;
             const challenge = await Challenge.findByPk(req.params.id);
 
             if (!challenge) {
-                res.status(404).json({ message: 'Не найден' });
+                res.status(404).json({ message: 'РќРµ РЅР°Р№РґРµРЅ' });
                 return;
             }
 
             if (challenge.creatorId !== req.user!.id) {
-                res.status(403).json({ message: 'Нет прав' });
+                res.status(403).json({ message: 'РќРµС‚ РїСЂР°РІ' });
                 return;
             }
 
-            await challenge.update({ status });
-
-            // ✅ При завершении — распределяем призы И удаляем файлы
             if (status === 'completed') {
-                console.log(`🏁 Челлендж #${challenge.id} завершён. Запускаем финализацию...`);
-
-                // 1. Распределяем призовой пул
-                if (challenge.betAmount > 0) {
-                    await distributePrizePool(challenge.id);
+                const completion = await completeChallengeWithPayout(challenge.id);
+                if (!completion.ok) {
+                    res.status(409).json({ message: 'Челлендж уже завершён' });
+                    return;
                 }
-
-                // 2. Удаляем все зашифрованные файлы сабмишенов
-                //    Делаем асинхронно чтобы не задерживать ответ клиенту
                 setImmediate(async () => {
                     await deleteChallengFiles(challenge.id);
                 });
-
-                console.log(`✅ Финализация челленджа #${challenge.id} запущена`);
+            } else {
+                if (
+                    (challenge.status === 'completed' || challenge.status === 'cancelled') &&
+                    status !== challenge.status
+                ) {
+                    res.status(409).json({ message: 'Нельзя изменить статус завершённого челленджа' });
+                    return;
+                }
+                await challenge.update({ status });
             }
 
-            // ✅ При отмене — тоже удаляем файлы
+            // вњ… РџСЂРё РѕС‚РјРµРЅРµ вЂ” С‚РѕР¶Рµ СѓРґР°Р»СЏРµРј С„Р°Р№Р»С‹
             if (status === 'cancelled') {
-                console.log(`❌ Челлендж #${challenge.id} отменён. Удаляем файлы...`);
+                console.log(`вќЊ Р§РµР»Р»РµРЅРґР¶ #${challenge.id} РѕС‚РјРµРЅС‘РЅ. РЈРґР°Р»СЏРµРј С„Р°Р№Р»С‹...`);
 
                 setImmediate(async () => {
                     await deleteChallengFiles(challenge.id);
                 });
             }
 
-            res.json(challenge);
+            const fresh = await Challenge.findByPk(challenge.id);
+            res.json(fresh ?? challenge);
         } catch (error: any) {
             console.error('updateStatus error:', error.message);
-            res.status(500).json({ message: 'Ошибка' });
+            res.status(500).json({ message: 'РћС€РёР±РєР°' });
         }
     },
 
@@ -482,7 +497,7 @@ export const challengeController = {
         try {
             const challenge = await Challenge.findByPk(req.params.id);
             if (!challenge) {
-                res.status(404).json({ message: 'Челлендж не найден' });
+                res.status(404).json({ message: 'Р§РµР»Р»РµРЅРґР¶ РЅРµ РЅР°Р№РґРµРЅ' });
                 return;
             }
 
@@ -516,7 +531,7 @@ export const challengeController = {
             });
         } catch (error: any) {
             console.error('getPrizePool error:', error.message);
-            res.status(500).json({ message: 'Ошибка' });
+            res.status(500).json({ message: 'РћС€РёР±РєР°' });
         }
     },
 
@@ -529,12 +544,12 @@ export const challengeController = {
 
             const challenge = await Challenge.findByPk(challengeId);
             if (!challenge) {
-                res.status(404).json({ message: 'Челлендж не найден' });
+                res.status(404).json({ message: 'Р§РµР»Р»РµРЅРґР¶ РЅРµ РЅР°Р№РґРµРЅ' });
                 return;
             }
 
             if (challenge.creatorId !== fromUserId) {
-                res.status(403).json({ message: 'Только создатель может приглашать' });
+                res.status(403).json({ message: 'РўРѕР»СЊРєРѕ СЃРѕР·РґР°С‚РµР»СЊ РјРѕР¶РµС‚ РїСЂРёРіР»Р°С€Р°С‚СЊ' });
                 return;
             }
 
@@ -543,14 +558,14 @@ export const challengeController = {
             });
 
             if (existing) {
-                res.status(400).json({ message: 'Приглашение уже отправлено' });
+                res.status(400).json({ message: 'РџСЂРёРіР»Р°С€РµРЅРёРµ СѓР¶Рµ РѕС‚РїСЂР°РІР»РµРЅРѕ' });
                 return;
             }
 
             await ChallengeInvite.create({ challengeId, fromUserId, toUserId: Number(toUserId) });
-            res.status(201).json({ message: 'Приглашение отправлено!' });
+            res.status(201).json({ message: 'РџСЂРёРіР»Р°С€РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ!' });
         } catch (error) {
-            res.status(500).json({ message: 'Ошибка' });
+            res.status(500).json({ message: 'РћС€РёР±РєР°' });
         }
     },
 
@@ -592,7 +607,7 @@ export const challengeController = {
             res.json(result);
         } catch (error: any) {
             console.error('getMyChallengeInvites error:', error.message);
-            res.status(500).json({ message: 'Ошибка: ' + error.message });
+            res.status(500).json({ message: 'РћС€РёР±РєР°: ' + error.message });
         }
     },
 
@@ -605,7 +620,7 @@ export const challengeController = {
 
             const invite = await ChallengeInvite.findByPk(inviteId);
             if (!invite || invite.toUserId !== userId) {
-                res.status(404).json({ message: 'Не найдено' });
+                res.status(404).json({ message: 'РќРµ РЅР°Р№РґРµРЅРѕ' });
                 return;
             }
 
@@ -616,7 +631,7 @@ export const challengeController = {
                     const user = await User.findByPk(userId);
                     if (!user || user.rikonCoins < challenge.betAmount) {
                         res.status(400).json({
-                            message: `Недостаточно монет. Нужно ${challenge.betAmount} 🪙 для участия`,
+                            message: `РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РјРѕРЅРµС‚. РќСѓР¶РЅРѕ ${challenge.betAmount} рџЄ™ РґР»СЏ СѓС‡Р°СЃС‚РёСЏ`,
                         });
                         return;
                     }
@@ -638,17 +653,24 @@ export const challengeController = {
                             by: challenge.betAmount,
                             where: { id: userId },
                         });
+                        await logCoinTransaction({
+                            userId,
+                            amount: -challenge.betAmount,
+                            kind: 'challenge_bet',
+                            description: 'Challenge bet on invite acceptance',
+                            challengeId: challenge.id,
+                        });
                     }
                 }
 
                 await invite.update({ status: 'accepted' });
-                res.json({ message: 'Принято! Ты в челлендже.' });
+                res.json({ message: 'РџСЂРёРЅСЏС‚Рѕ! РўС‹ РІ С‡РµР»Р»РµРЅРґР¶Рµ.' });
             } else {
                 await invite.update({ status: 'rejected' });
-                res.json({ message: 'Отклонено' });
+                res.json({ message: 'РћС‚РєР»РѕРЅРµРЅРѕ' });
             }
         } catch (error) {
-            res.status(500).json({ message: 'Ошибка' });
+            res.status(500).json({ message: 'РћС€РёР±РєР°' });
         }
     },
 
@@ -674,7 +696,8 @@ export const challengeController = {
 
             res.json(users);
         } catch (error) {
-            res.status(500).json({ message: 'Ошибка поиска' });
+            res.status(500).json({ message: 'РћС€РёР±РєР° РїРѕРёСЃРєР°' });
         }
     },
 };
+

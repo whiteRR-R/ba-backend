@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import fs from 'fs';
 import { AuthRequest } from '../types';
-import { User, Submission, Vote, Participant, Challenge } from '../models';
+import { User, Submission, Vote, Participant, Challenge, CoinTransaction } from '../models';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
 export const userController = {
@@ -148,7 +148,43 @@ avgRating = votes.length > 0
       res.status(500).json({ message: 'Ошибка обновления профиля' });
     }
   },
+  getCoinTransactions: async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const limitRaw = Number(req.query.limit ?? 30);
+      const pageRaw = Number(req.query.page ?? 1);
+      const kind = req.query.kind ? String(req.query.kind) : null;
 
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 30;
+      const page = Number.isFinite(pageRaw) ? Math.max(pageRaw, 1) : 1;
+      const offset = (page - 1) * limit;
+
+      const whereClause: any = { userId };
+      if (kind) {
+        whereClause.kind = kind;
+      }
+
+      const { rows, count } = await CoinTransaction.findAndCountAll({
+        where: whereClause,
+        include: [{ model: Challenge, as: 'challenge', attributes: ['id', 'title'] }],
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset,
+      });
+
+      res.json({
+        items: rows,
+        pagination: {
+          total: count,
+          page,
+          limit,
+          totalPages: Math.max(1, Math.ceil(count / limit)),
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: '������ ��������� ������� ������: ' + error.message });
+    }
+  },
   getUserById: async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const user = await User.findByPk(req.params.id, {
@@ -166,3 +202,4 @@ avgRating = votes.length > 0
     }
   },
 };
+

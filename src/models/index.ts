@@ -12,6 +12,7 @@ import Message from './Message';
 import Notification from './Notification';
 import StreakRewardLog from './StreakRewardLog';
 import SpinHistory from './SpinHistory';
+import CoinTransaction from './CoinTransaction';
 
 
 
@@ -62,9 +63,13 @@ User.hasMany(StreakRewardLog, { foreignKey: 'userId', as: 'streakRewardLogs' });
 StreakRewardLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 User.hasMany(SpinHistory, { foreignKey: 'userId', as: 'spinHistory' });
 SpinHistory.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(CoinTransaction, { foreignKey: 'userId', as: 'coinTransactions' });
+CoinTransaction.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Challenge.hasMany(CoinTransaction, { foreignKey: 'challengeId', as: 'coinTransactions' });
+CoinTransaction.belongsTo(Challenge, { foreignKey: 'challengeId', as: 'challenge' });
 
 export {
   User, Challenge, Participant, Task, Submission,
   Vote, FamilyMember, FamilyEvent, FamilyInvite,
-  ChallengeInvite, Message, Notification, StreakRewardLog, SpinHistory
+  ChallengeInvite, Message, Notification, StreakRewardLog, SpinHistory, CoinTransaction
 };

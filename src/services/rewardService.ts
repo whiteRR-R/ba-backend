@@ -1,5 +1,6 @@
-﻿import sequelize from '../config/database';
+import sequelize from '../config/database';
 import { SpinHistory, StreakRewardLog, User } from '../models';
+import { logCoinTransaction } from './coinTransactionService';
 
 const APP_TIME_ZONE = 'Asia/Almaty';
 const BASE_DAILY_STREAK_REWARD = 2;
@@ -160,6 +161,17 @@ export const rewardService = {
         { transaction }
       );
 
+      await logCoinTransaction(
+        {
+          userId,
+          amount: totalReward,
+          kind: 'streak_reward',
+          description: `Daily streak reward (day ${newStreakCount})`,
+          submissionId: submissionId ?? null,
+        },
+        { transaction }
+      );
+
       return {
         rewarded: true,
         streakCount: newStreakCount,
@@ -229,12 +241,23 @@ export const rewardService = {
       user.nextFreeSpinAt = nextAt;
       await user.save({ transaction });
 
-      await SpinHistory.create(
+      const spinHistory = await SpinHistory.create(
         {
           userId,
           spinType: 'free',
           reward,
           nextAvailableAt: nextAt,
+        },
+        { transaction }
+      );
+
+      await logCoinTransaction(
+        {
+          userId,
+          amount: reward,
+          kind: 'spin_reward',
+          description: 'Free spin reward',
+          spinHistoryId: spinHistory.id,
         },
         { transaction }
       );
@@ -269,3 +292,4 @@ export const rewardService = {
     };
   },
 };
+
