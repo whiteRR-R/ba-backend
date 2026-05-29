@@ -5,6 +5,7 @@ import { AuthRequest } from '../types';
 import { Challenge, Participant, Task, User } from '../models';
 import { deleteChallengFiles } from '../utils/cleanupFiles';
 import { logCoinTransaction } from '../services/coinTransactionService';
+import { kickParticipantFromChallenge } from '../services/challengeKickService';
 import {
   autoCompleteExpiredChallenges,
   CompletionMode,
@@ -204,6 +205,52 @@ export const adminController = {
     } catch (error: any) {
       await transaction.rollback();
       res.status(500).json({ message: 'Failed to delete challenge: ' + error.message });
+    }
+  },
+
+  kickParticipant: async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const challengeId = Number(req.params.id);
+      const targetUserId = Number(req.params.userId);
+      const actorUserId = req.user!.id;
+      const actorRole = req.user?.role;
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+
+      const result = await kickParticipantFromChallenge({
+        challengeId,
+        targetUserId,
+        actorUserId,
+        actorRole,
+        reason,
+      });
+
+      if (!result.ok) {
+        if (result.reason === 'challenge_not_found') {
+          res.status(404).json({ message: 'Challenge not found' });
+          return;
+        }
+        if (result.reason === 'cannot_kick_creator') {
+          res.status(400).json({ message: 'Cannot kick challenge creator' });
+          return;
+        }
+        if (result.reason === 'already_kicked') {
+          res.status(409).json({ message: 'User already kicked' });
+          return;
+        }
+        if (result.reason === 'not_participant') {
+          res.status(404).json({ message: 'User is not a participant' });
+          return;
+        }
+        res.status(403).json({ message: 'No permissions to kick this user' });
+        return;
+      }
+
+      res.json({
+        message: 'Participant kicked by admin',
+        refundedCoins: result.refundedCoins,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: 'Failed to kick participant: ' + error.message });
     }
   },
 };

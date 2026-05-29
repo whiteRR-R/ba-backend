@@ -1,10 +1,11 @@
 ﻿import { Response } from 'express';
 import { Op } from 'sequelize';
 import { AuthRequest } from '../types';
-import { Challenge, Participant, Task, User, ChallengeInvite, FamilyMember } from '../models';
+import { Challenge, Participant, Task, User, ChallengeInvite, FamilyMember, ChallengeKick } from '../models';
 import { deleteChallengFiles } from '../utils/cleanupFiles';
 import { completeChallengeWithPayout } from '../services/challengeCompletionService';
 import { logCoinTransaction } from '../services/coinTransactionService';
+import { kickParticipantFromChallenge } from '../services/challengeKickService';
 
 // в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 // Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅР°СЏ С„СѓРЅРєС†РёСЏ вЂ” СЂР°СЃРїСЂРµРґРµР»РµРЅРёРµ РїСЂРёР·РѕРІРѕРіРѕ РїСѓР»Р°
@@ -372,6 +373,12 @@ export const challengeController = {
                 return;
             }
 
+            const kicked = await ChallengeKick.findOne({ where: { challengeId, userId } });
+            if (kicked) {
+                res.status(403).json({ message: 'Вы были исключены из этого челленджа и не можете войти повторно' });
+                return;
+            }
+
             if (challenge.betAmount > 0) {
                 const user = await User.findByPk(userId);
                 if (!user || user.rikonCoins < challenge.betAmount) {
@@ -562,6 +569,14 @@ export const challengeController = {
                 return;
             }
 
+            const kicked = await ChallengeKick.findOne({
+                where: { challengeId, userId: Number(toUserId) },
+            });
+            if (kicked) {
+                res.status(400).json({ message: 'Пользователь был исключён из этого челленджа' });
+                return;
+            }
+
             await ChallengeInvite.create({ challengeId, fromUserId, toUserId: Number(toUserId) });
             res.status(201).json({ message: 'РџСЂРёРіР»Р°С€РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ!' });
         } catch (error) {
@@ -626,6 +641,14 @@ export const challengeController = {
 
             if (accept) {
                 const challenge = await Challenge.findByPk(invite.challengeId);
+                const kicked = await ChallengeKick.findOne({
+                    where: { challengeId: invite.challengeId, userId },
+                });
+                if (kicked) {
+                    await invite.update({ status: 'rejected' });
+                    res.status(403).json({ message: 'Вы были исключены из этого челленджа' });
+                    return;
+                }
 
                 if (challenge && challenge.betAmount > 0) {
                     const user = await User.findByPk(userId);
@@ -697,6 +720,53 @@ export const challengeController = {
             res.json(users);
         } catch (error) {
             res.status(500).json({ message: 'РћС€РёР±РєР° РїРѕРёСЃРєР°' });
+        }
+    },
+
+    // DELETE /api/challenges/:id/kick/:userId
+    kickParticipant: async (req: AuthRequest, res: Response): Promise<void> => {
+        try {
+            const challengeId = Number(req.params.id);
+            const targetUserId = Number(req.params.userId);
+            const actorUserId = req.user!.id;
+            const actorRole = req.user?.role;
+            const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+
+            const result = await kickParticipantFromChallenge({
+                challengeId,
+                targetUserId,
+                actorUserId,
+                actorRole,
+                reason,
+            });
+
+            if (!result.ok) {
+                if (result.reason === 'challenge_not_found') {
+                    res.status(404).json({ message: 'Челлендж не найден' });
+                    return;
+                }
+                if (result.reason === 'cannot_kick_creator') {
+                    res.status(400).json({ message: 'Нельзя исключить создателя челленджа' });
+                    return;
+                }
+                if (result.reason === 'already_kicked') {
+                    res.status(409).json({ message: 'Пользователь уже исключён' });
+                    return;
+                }
+                if (result.reason === 'not_participant') {
+                    res.status(404).json({ message: 'Пользователь не является участником челленджа' });
+                    return;
+                }
+                res.status(403).json({ message: 'Нет прав для исключения участника' });
+                return;
+            }
+
+            res.json({
+                message: 'Участник исключён из челленджа',
+                refundedCoins: result.refundedCoins,
+            });
+        } catch (error: any) {
+            res.status(500).json({ message: 'Ошибка исключения участника: ' + error.message });
         }
     },
 };

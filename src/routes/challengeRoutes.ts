@@ -18,6 +18,7 @@ router.get('/',                     challengeController.getAll);
 router.post('/',                    challengeController.create);
 router.get('/:id',                  challengeController.getById);
 router.post('/:id/join',            challengeController.join);
+router.delete('/:id/kick/:userId',  challengeController.kickParticipant);
 router.get('/:id/tasks',            challengeController.getTasks);
 router.patch('/:id/status',         challengeController.updateStatus);
 router.post('/:id/invite',          challengeController.inviteUser);

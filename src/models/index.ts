@@ -13,6 +13,7 @@ import Notification from './Notification';
 import StreakRewardLog from './StreakRewardLog';
 import SpinHistory from './SpinHistory';
 import CoinTransaction from './CoinTransaction';
+import ChallengeKick from './ChallengeKick';
 
 
 
@@ -67,9 +68,15 @@ User.hasMany(CoinTransaction, { foreignKey: 'userId', as: 'coinTransactions' });
 CoinTransaction.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 Challenge.hasMany(CoinTransaction, { foreignKey: 'challengeId', as: 'coinTransactions' });
 CoinTransaction.belongsTo(Challenge, { foreignKey: 'challengeId', as: 'challenge' });
+Challenge.hasMany(ChallengeKick, { foreignKey: 'challengeId', as: 'kicks' });
+ChallengeKick.belongsTo(Challenge, { foreignKey: 'challengeId', as: 'challenge' });
+User.hasMany(ChallengeKick, { foreignKey: 'userId', as: 'challengeKicks' });
+ChallengeKick.belongsTo(User, { foreignKey: 'userId', as: 'kickedUser' });
+User.hasMany(ChallengeKick, { foreignKey: 'kickedByUserId', as: 'issuedChallengeKicks' });
+ChallengeKick.belongsTo(User, { foreignKey: 'kickedByUserId', as: 'kickedBy' });
 
 export {
   User, Challenge, Participant, Task, Submission,
   Vote, FamilyMember, FamilyEvent, FamilyInvite,
-  ChallengeInvite, Message, Notification, StreakRewardLog, SpinHistory, CoinTransaction
+  ChallengeInvite, Message, Notification, StreakRewardLog, SpinHistory, CoinTransaction, ChallengeKick
 };
