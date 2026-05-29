@@ -63,7 +63,7 @@ const buildPrizeInfo = (totalPool: number, participantCount: number) => {
         return {
             totalPool,
             prizes: [
-                { place: 1, percent: 100, amount: totalPool, label: 'рџҐ‡ 1 РјРµСЃС‚Рѕ' },
+                { place: 1, percent: 100, amount: totalPool, label: '\uD83E\uDD47 1 \u043C\u0435\u0441\u0442\u043E' },
             ],
         };
     }
@@ -72,8 +72,8 @@ const buildPrizeInfo = (totalPool: number, participantCount: number) => {
         return {
             totalPool,
             prizes: [
-                { place: 1, percent: 70, amount: Math.floor(totalPool * 0.7), label: 'рџҐ‡ 1 РјРµСЃС‚Рѕ' },
-                { place: 2, percent: 30, amount: Math.floor(totalPool * 0.3), label: 'рџҐ€ 2 РјРµСЃС‚Рѕ' },
+                { place: 1, percent: 70, amount: Math.floor(totalPool * 0.7), label: '\uD83E\uDD47 1 \u043C\u0435\u0441\u0442\u043E' },
+                { place: 2, percent: 30, amount: Math.floor(totalPool * 0.3), label: '\uD83E\uDD48 2 \u043C\u0435\u0441\u0442\u043E' },
             ],
         };
     }
@@ -81,11 +81,30 @@ const buildPrizeInfo = (totalPool: number, participantCount: number) => {
     return {
         totalPool,
         prizes: [
-            { place: 1, percent: 50, amount: Math.floor(totalPool * 0.5), label: 'рџҐ‡ 1 РјРµСЃС‚Рѕ' },
-            { place: 2, percent: 30, amount: Math.floor(totalPool * 0.3), label: 'рџҐ€ 2 РјРµСЃС‚Рѕ' },
-            { place: 3, percent: 20, amount: Math.floor(totalPool * 0.2), label: 'рџҐ‰ 3 РјРµСЃС‚Рѕ' },
+            { place: 1, percent: 50, amount: Math.floor(totalPool * 0.5), label: '\uD83E\uDD47 1 \u043C\u0435\u0441\u0442\u043E' },
+            { place: 2, percent: 30, amount: Math.floor(totalPool * 0.3), label: '\uD83E\uDD48 2 \u043C\u0435\u0441\u0442\u043E' },
+            { place: 3, percent: 20, amount: Math.floor(totalPool * 0.2), label: '\uD83E\uDD49 3 \u043C\u0435\u0441\u0442\u043E' },
         ],
     };
+};
+
+// Автоактивация: если дата старта уже наступила, pending -> active.
+const autoActivateStartedChallenges = async (): Promise<void> => {
+    try {
+        const now = new Date();
+        await Challenge.update(
+            { status: 'active' },
+            {
+                where: {
+                    status: 'pending',
+                    startDate: { [Op.lte]: now },
+                    endDate: { [Op.gte]: now },
+                },
+            },
+        );
+    } catch (error: any) {
+        console.error('autoActivateStartedChallenges error:', error.message);
+    }
 };
 
 // РђРІС‚РѕС„РёРЅР°Р»РёР·Р°С†РёСЏ РїСЂРѕСЃСЂРѕС‡РµРЅРЅС‹С… С‡РµР»Р»РµРЅРґР¶РµР№.
@@ -118,12 +137,17 @@ const autoCompleteExpiredChallenges = async (): Promise<void> => {
     }
 };
 
+const syncChallengeStatuses = async (): Promise<void> => {
+    await autoActivateStartedChallenges();
+    await autoCompleteExpiredChallenges();
+};
+
 export const challengeController = {
 
     // GET /api/challenges/family
     getFamilyChallenges: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
-            await autoCompleteExpiredChallenges();
+            await syncChallengeStatuses();
 
             const userId = req.user!.id;
             const { familyOwnerId } = req.query;
@@ -181,7 +205,7 @@ export const challengeController = {
     // GET /api/challenges
     getAll: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
-            await autoCompleteExpiredChallenges();
+            await syncChallengeStatuses();
 
             const userId = req.user!.id;
             const challenges = await Challenge.findAll({
@@ -220,7 +244,7 @@ export const challengeController = {
     // GET /api/challenges/:id
     getById: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
-            await autoCompleteExpiredChallenges();
+            await syncChallengeStatuses();
 
             const userId = req.user!.id;
             const challenge = await Challenge.findByPk(req.params.id, {
@@ -340,7 +364,7 @@ export const challengeController = {
     // POST /api/challenges/:id/join
     join: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
-            await autoCompleteExpiredChallenges();
+            await syncChallengeStatuses();
 
             const challengeId = Number(req.params.id);
             const userId = req.user!.id;
@@ -421,7 +445,7 @@ export const challengeController = {
     // GET /api/challenges/:id/tasks
     getTasks: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
-            await autoCompleteExpiredChallenges();
+            await syncChallengeStatuses();
 
             const challenge = await Challenge.findByPk(req.params.id, {
                 attributes: ['id', 'status'],
@@ -502,6 +526,8 @@ export const challengeController = {
     // GET /api/challenges/:id/prize-pool
     getPrizePool: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
+            await syncChallengeStatuses();
+
             const challenge = await Challenge.findByPk(req.params.id);
             if (!challenge) {
                 res.status(404).json({ message: 'Р§РµР»Р»РµРЅРґР¶ РЅРµ РЅР°Р№РґРµРЅ' });
