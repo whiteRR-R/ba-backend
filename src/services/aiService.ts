@@ -52,6 +52,18 @@ const getRetryDelay = (errorMessage: string): number => {
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
+  let timeoutHandle: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+};
 
 const isTransientModelError = (message: string = ''): boolean => {
   const msg = message.toLowerCase();
@@ -350,15 +362,19 @@ Return only JSON: {"score":80,"comment":"...","isCompleted":true}`;
 You are B&A Challenge assistant.
 Answer only using this user data context. If data is missing, clearly say it's not found in context.
 Strict format:
-- exactly 4-5 medium sentences
-- around 420-650 characters total
+- exactly 2 short sentences
+- around 140-240 characters total
 - plain text only (no JSON, no markdown, no bullets)
 - never start with "*" or "-"
-- include concrete facts from context (challenge titles, counts, ближайшие сроки)
+- include concrete facts from context (counts, nearest deadlines, challenge names when relevant)
 - no intro and no outro
 Context: ${challengeContext}
 User message: ${userMessage}`;
 
-    return generateWithFallback(prompt, { maxOutputTokens: 220, temperature: 0.2, topP: 0.75 });
+    return withTimeout(
+      generateWithFallback(prompt, { maxOutputTokens: 90, temperature: 0.1, topP: 0.65 }),
+      18000,
+      'AI chat timeout'
+    );
   },
 };

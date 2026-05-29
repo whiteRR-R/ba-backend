@@ -31,6 +31,17 @@ export const submissionController = {
         res.status(404).json({ message: 'Задача не найдена' });
         return;
       }
+      const challenge = await Challenge.findByPk(task.challengeId, {
+        attributes: ['id', 'status'],
+      });
+      if (!challenge) {
+        res.status(404).json({ message: 'Челлендж не найден' });
+        return;
+      }
+      if (challenge.status === 'completed' || challenge.status === 'cancelled') {
+        res.status(403).json({ message: 'Челлендж завершён, загрузка доказательств недоступна' });
+        return;
+      }
 
       const participant = await Participant.findOne({
         where: { challengeId: task.challengeId, userId },
@@ -86,11 +97,22 @@ export const submissionController = {
         return;
       }
 
+      const challenge = await Challenge.findByPk(task.challengeId, {
+        attributes: ['id', 'status', 'creatorId'],
+      });
+      if (!challenge) {
+        res.status(404).json({ message: 'Челлендж не найден' });
+        return;
+      }
+      if (challenge.status === 'completed' || challenge.status === 'cancelled') {
+        res.status(403).json({ message: 'Челлендж завершён, доступ к задаче закрыт' });
+        return;
+      }
+
       const participant = await Participant.findOne({
         where: { challengeId: task.challengeId, userId },
       });
 
-      const challenge = await Challenge.findByPk(task.challengeId);
       const isCreator = challenge?.creatorId === userId;
 
       if (!participant && !isCreator) {
