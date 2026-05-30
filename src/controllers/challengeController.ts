@@ -446,21 +446,49 @@ export const challengeController = {
     getTasks: async (req: AuthRequest, res: Response): Promise<void> => {
         try {
             await syncChallengeStatuses();
+            const userId = req.user!.id;
+            const challengeId = Number(req.params.id);
 
-            const challenge = await Challenge.findByPk(req.params.id, {
-                attributes: ['id', 'status'],
+            const challenge = await Challenge.findByPk(challengeId, {
+                attributes: ['id', 'status', 'creatorId', 'familyOwnerId'],
             });
             if (!challenge) {
                 res.status(404).json({ message: 'Челлендж не найден' });
                 return;
             }
+
+            // Задачи доступны только участникам/создателю (для семейных — только членам семьи).
+            const isCreator = challenge.creatorId === userId;
+            const participant = await Participant.findOne({
+                where: { challengeId, userId },
+                attributes: ['id'],
+            });
+            const isParticipant = Boolean(participant);
+
+            if (challenge.familyOwnerId) {
+                const isFamilyOwner = challenge.familyOwnerId === userId;
+                const familyMember = await FamilyMember.findOne({
+                    where: { userId: challenge.familyOwnerId, appUserId: userId },
+                    attributes: ['id'],
+                });
+                const isFamilyMember = Boolean(familyMember);
+
+                if (!isCreator && !isParticipant && !isFamilyOwner && !isFamilyMember) {
+                    res.status(403).json({ message: 'Нет доступа к задачам этого семейного челленджа' });
+                    return;
+                }
+            } else if (!isCreator && !isParticipant) {
+                res.status(403).json({ message: 'Нет доступа к задачам чужого челленджа' });
+                return;
+            }
+
             if (challenge.status === 'completed' || challenge.status === 'cancelled') {
                 res.status(403).json({ message: 'Челлендж завершён, доступ к задачам закрыт' });
                 return;
             }
 
             const tasks = await Task.findAll({
-                where: { challengeId: req.params.id },
+                where: { challengeId },
                 order: [['day', 'ASC']],
             });
             res.json(tasks);
